@@ -2,17 +2,19 @@ import numpy as np
 from collections import deque
 from random import sample as rsample
 class NeuralNetwork:
-    def __init__(self, input_size, hidden_size, output_size, lr=0.1, kernel=None):
-        # Weights
-        
-        
-        self.w1 = np.random.randn(hidden_size, input_size) * 0.01
+    def __init__(self, input_size, hidden_size, output_size, lr=0.1, kernel=None, grad_clip=5.0):
+        # He initialization for the ReLU hidden layer (scale ~ sqrt(2 / fan_in)).
+        # The old fixed 0.01 scale was ~40x too small for 13 inputs and starved
+        # the hidden units of signal, which throttled learning.
+        self.w1 = np.random.randn(hidden_size, input_size) * np.sqrt(2.0 / input_size)
         self.b1 = np.zeros((1, hidden_size))
-        
-        self.w2 = np.random.randn(output_size, hidden_size) * 0.01
+
+        # Smaller output-layer init keeps initial Q-values near zero -> stable DQN start.
+        self.w2 = np.random.randn(output_size, hidden_size) * np.sqrt(1.0 / hidden_size)
         self.b2 = np.zeros((1, output_size))
-        
+
         self.lr = lr
+        self.grad_clip = grad_clip
 
         if kernel is None:
             self.kernel = np.random.randn(3, 3) * 0.01
@@ -47,28 +49,40 @@ class NeuralNetwork:
         return a1, a2
     
     def backward(self, X ,y_true, a1, a2):
+        # Average the gradient over the batch so the update magnitude is
+        # independent of batch_size (summing made it ~batch_size too large,
+        # which then saturated the clip below and turned SGD into sign-descent).
+        n = X.shape[0]
         delta_output = a2 - y_true
-        self.dw2 = delta_output.T @ a1
-        self.db2 = np.sum(delta_output, axis=0, keepdims=True)
-        
+        self.dw2 = (delta_output.T @ a1) / n
+        self.db2 = np.sum(delta_output, axis=0, keepdims=True) / n
+
         self.delta_hidden = (delta_output @ self.w2) * self.relu_derivative(a1)
-        
-        self.dw1 = self.delta_hidden.T @ X
-        self.db1 = np.sum(self.delta_hidden, axis=0, keepdims=True)
+
+        self.dw1 = (self.delta_hidden.T @ X) / n
+        self.db1 = np.sum(self.delta_hidden, axis=0, keepdims=True) / n
         
     def update_weights(self):
-        
-        self.dw1 = np.clip(self.dw1, -1, 1)
-        self.dw2 = np.clip(self.dw2, -1, 1)
-        self.db1 = np.clip(self.db1, -1, 1)
-        self.db2 = np.clip(self.db2, -1, 1)
+        # Global-norm gradient clipping: only scale the gradient down (as a whole)
+        # if its combined L2 norm exceeds grad_clip. Unlike the old per-element
+        # clip to [-1, 1], this preserves the gradient DIRECTION and the relative
+        # size of each weight's update, so the net can actually fit large Q-targets
+        # instead of collapsing to sign-descent.
+        grads = [self.dw1, self.db1, self.dw2, self.db2]
+        total_norm = np.sqrt(sum(np.sum(g * g) for g in grads))
+        if total_norm > self.grad_clip:
+            scale = self.grad_clip / (total_norm + 1e-8)
+            self.dw1 *= scale
+            self.db1 *= scale
+            self.dw2 *= scale
+            self.db2 *= scale
 
         self.w1 -= self.lr * self.dw1
         self.b1 -= self.lr * self.db1
 
         self.w2 -= self.lr * self.dw2
         self.b2 -= self.lr * self.db2
-        
+
         if self.dk is not None:
             self.kernel -= self.lr * self.dk
     
