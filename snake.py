@@ -33,10 +33,10 @@ class Snake:
     def get_observation(self):
         head_x, head_y = self.snake[0]
 
-        dir_l = self.direction == (-1, 0)
-        dir_r = self.direction == (1, 0)
-        dir_u = self.direction == (0, -1)
-        dir_d = self.direction == (0, 1)
+        dir_l = self.direction == (0, -1)
+        dir_r = self.direction == (0, 1)
+        dir_u = self.direction == (-1, 0)
+        dir_d = self.direction == (1, 0)
 
         def danger(p):
             return (
@@ -93,7 +93,7 @@ class Snake:
     def step(self, action):
         self.steps_since_food += 1
         if self.steps_since_food >= self.max_steps or self.game_over:
-            return self.get_observation(), -2, True
+            return self.get_observation(), -10, True
         
         hx, hy = self.snake[0]
         fx, fy = self.food
@@ -109,7 +109,7 @@ class Snake:
             new_head[1] < 0 or new_head[1] >= self.grid_size or
             new_head in self.snake):
             self.game_over = True
-            return self.get_observation(), -2, True
+            return self.get_observation(), -10, True
         
         
         self.snake.insert(0, new_head)
@@ -121,10 +121,10 @@ class Snake:
             print(self.score)
             self.steps_since_food = 0 
             self.spawn_food()
-            reward = 1000
+            reward = 10 + (delta * 10)  # Big reward for eating food, plus small reward for getting closer
         else:
             self.snake.pop()
-            reward = -0.004 + delta
+            reward = -0.1 + (delta * 10)  # Small reward for getting closer, penalty for moving away
 
         return self.get_observation(), reward, self.game_over
     
@@ -150,7 +150,31 @@ class Snake:
         self.clock.tick(30)
         
         
-        
+
+def test_agent(env, model, episodes=5, render=True):
+    total_score = 0
+
+    for ep in range(episodes):
+        obs = env.reset()
+        done = False
+        score = 0
+
+        while not done:
+            if render:
+                env.render()
+
+            q_values = model.predict(obs)
+            action = np.argmax(q_values)
+            obs, reward, done = env.step(action)
+
+        print(f"Test Episode {ep+1} | Score: {env.score}")
+        total_score += env.score
+
+    avg_score = total_score / episodes
+    print(f"\nAverage Score over {episodes} test episodes: {avg_score}")
+    return avg_score
+
+
         
 if __name__ == "__main__":
     env = Snake(15)
@@ -168,8 +192,7 @@ if __name__ == "__main__":
     gamma = 0.99
     epoch = 0 
     # Training
-    for i in range(50000):
-        
+    for i in range(10000):
         if random.random() < epsilon:
             action = random.randint(0, len(ACTIONS) - 1)
         else:
@@ -207,28 +230,6 @@ if __name__ == "__main__":
             done = False
         epsilon = max(epsilon * epsilon_decay, epsilon_min)
 
+    test_agent(env, nn, episodes=5000, render=True)
 
-def test_agent(env, model, episodes=5, render=True):
-    total_score = 0
 
-    for ep in range(episodes):
-        obs = env.reset()
-        done = False
-        score = 0
-
-        while not done:
-            if render:
-                env.render()
-
-            q_values = model.predict(obs)
-            action = np.argmax(q_values)
-            obs, reward, done = env.step(action)
-
-        print(f"Test Episode {ep+1} | Score: {env.score}")
-        total_score += score
-
-    avg_score = total_score / episodes
-    print(f"\nAverage Score over {episodes} test episodes: {avg_score}")
-    return avg_score
-
-test_agent(env, nn, episodes=5000, render=True)
